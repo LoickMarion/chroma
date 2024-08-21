@@ -60,6 +60,7 @@ enum
     BULK_REEMIT      = 0x1 << 9,
     CHERENKOV        = 0x1 << 10,
     SCINTILLATION    = 0x1 << 11,
+    REFLECT_LOBED    = 0x1 << 12,
     NAN_ABORT        = 0x1 << 31
 }; // processes
 
@@ -772,9 +773,31 @@ propagate_at_sipmEmpirical(Photon &p, State &s, curandState &rng, Surface *surfa
 
         return BREAK;
     }
-
 } // propagate_at_sipmEmpirical
 
+__device__ int
+propagate_at_specularLobe(Photon &p, State &s, curandState &rng, Surface *surface, bool use_weights=false){
+
+    float3 p_projection = s.surface_normal * (dot(s.surface_normal, p.direction));
+    float3 specular_direction = p.direction - 2.0f * p_projection; 
+
+    float3 diffuse_direction = make_float3(0.0f, 0.0f, 0.0f);
+    float ndotv;
+    do {
+        diffuse_direction = uniform_sphere(&rng);
+        ndotv = dot(diffuse_direction, s.surface_normal);
+        if (ndotv < 0.0f) {
+            diffuse_direction = -diffuse_direction;
+            ndotv = -ndotv;
+        }
+    } while (! (curand_uniform(&rng) < ndotv) );
+
+    p.direction = (diffuse_direction + 2.0f * specular_direction)/ 3.0f;
+    p.history |= REFLECT_LOBED;
+
+    return CONTINUE;
+
+}
 __device__ int
 propagate_at_surface(Photon &p, State &s, curandState &rng, Geometry *geometry,
                      bool use_weights=false)
@@ -791,6 +814,8 @@ propagate_at_surface(Photon &p, State &s, curandState &rng, Geometry *geometry,
         return propagate_dielectric_metal(p, s, rng, surface, use_weights);
     else if (surface->model == SURFACE_SIPM_EMPIRICAL)
         return propagate_at_sipmEmpirical(p, s, rng, surface, use_weights);
+    else if (surface->model == SURFACE_SPECULAR_LOBE_TEST)
+        return propagate_at_specularLobe(p, s, rng, surface, use_weights);
     else {
         // use default surface model: do a combination of specular and
         // diffuse reflection, detection, and absorption based on relative
