@@ -9,6 +9,7 @@
 #include "mesh.h"
 #include "geometry.h"
 #include "cx.h"
+#include "cmath"
 
 #define WEIGHT_LOWER_THRESHOLD 0.0001f
 
@@ -61,6 +62,7 @@ enum
     CHERENKOV        = 0x1 << 10,
     SCINTILLATION    = 0x1 << 11,
     REFLECT_LOBED    = 0x1 << 12,
+    BACKSCATTER      = 0x1 << 13,
     NAN_ABORT        = 0x1 << 31
 }; // processes
 
@@ -403,6 +405,51 @@ propagate_at_diffuse_reflector(Photon &p, State &s, curandState &rng)
     return CONTINUE;
 } // propagate_at_diffuse_reflector
 
+__device__ int
+backscatter_reflection(Photon &p, State &s)
+{
+    p.direction = -p.direction;
+    p.polarization = -p.polarization;
+
+    p.history |= BACKSCATTER;
+
+    return CONTINUE;
+
+} // backscatter_reflection
+
+__device__ int
+specular_lobed_reflection(Photon &p, State &s, curandState &rng, Surface* surface){
+
+    //initially reflect the photon fully specularly
+    float3 p_projection = s.surface_normal * (dot(s.surface_normal, p.direction));
+    p.direction = p.direction - 2.0f * p_projection;
+
+    //initialize parameters that will calculate the deviation from the purely specular reflection
+    float sigma_alpha = *(surface->sigma_alpha);
+    float max_deviation = fmin(1.0f, 4.0f * sigma_alpha);
+    float alpha;
+    float phi;
+    float sin_alpha;
+
+    //choose angle values and create the perturbation angle
+    do {
+        do {
+            alpha = sample_gaussian(&rng, 0.0f, sigma_alpha); //pick a perturbation angle from a gaussian dsitribution
+            sin_alpha = sin(alpha);
+            
+        } while (curand_uniform(&rng) * max_deviation > sin_alpha || alpha > M_PI_2);
+
+        phi = curand_uniform(&rng) * 2.0f * M_PI;
+        float3 perturbation = make_float3(sin_alpha * cos(phi), sin_alpha * sin(phi), cos(alpha));
+        p.direction += perturbation;    // add the perturbation angle to the specular reflection.
+
+    } while(dot(p.direction, s.surface_normal) > 0); //make sure the reflection travels away from the surface
+
+    p.history |= REFLECT_LOBED;
+    //do i change polarization?
+
+    return CONTINUE;
+}
 __device__ int
 propagate_complex(Photon &p, State &s, curandState &rng, Surface* surface, bool use_weights=false)
 {
@@ -768,7 +815,7 @@ propagate_at_sipmEmpirical(Photon &p, State &s, curandState &rng, Surface *surfa
         float uniform_sample_detect = curand_uniform(&rng);
         if (uniform_sample_detect < relativePDE_prob)
             p.history |= SURFACE_DETECT;
-        else
+        else 
             p.history |= SURFACE_ABSORB;
 
         return BREAK;
@@ -777,6 +824,37 @@ propagate_at_sipmEmpirical(Photon &p, State &s, curandState &rng, Surface *surfa
 
 __device__ int
 propagate_at_specularLobe(Photon &p, State &s, curandState &rng, Surface *surface, bool use_weights=false){
+    //calculate the probablity that a photon gets reflected
+    float reflect_prob = 0.5;
+    //maybe look into transmittance later idk
+
+    //read in hte porbabilities of each type of reflection from the surface struct (located in geometry_types.h)
+    float reflect_specular = interp_property(surface, p.wavelength, surface->reflect_specular);
+    float reflect_diffuse = interp_property(surface, p.wavelength, surface->reflect_diffuse);
+    float reflect_lobed = interp_property(surface, p.wavelength, surface->reflect_lobed);
+    float backscatter = interp_property(surface, p.wavelength, surface->backscatter);
+
+    //select a random number to decided if the photon gets reflected
+    float uniform_sample = curand_uniform(&rng);
+    if ((uniform_sample < reflect_prob)) {
+
+        //select another random number to determine which type of reflection occurs.
+        float reflection_type_prob = curand_uniform(&rng);
+
+        if ( reflection_type_prob < reflect_specular){
+            return propagate_at_specular_reflector(p, s);
+        }
+
+        else if (reflection_type_prob < reflect_specular + reflect_diffuse){
+            return propagate_at_diffuse_reflector(p, s, rng);
+        }
+        else if (reflection_type_prob < reflect_specular + reflect_diffuse + backscatter){
+            return backscatter_reflection(p,s);
+        }
+        else{
+
+        }
+    }
 
     float3 p_projection = s.surface_normal * (dot(s.surface_normal, p.direction));
     float3 specular_direction = p.direction - 2.0f * p_projection; 

@@ -54,6 +54,13 @@ sample_cdf(curandState *rng, int ncdf, float x0, float delta, float *cdf_y)
     return x0 + delta*lower + delta*(u-cdf_y[lower])/delta_cdf_y;
 }
 
+//Sample from a gaussian distribution
+
+__device__ float
+sample_gaussian(curandState *rng, float mean, float std){
+    return mean + std * curand_normal(rng);
+}
+
 extern "C"
 {
 
