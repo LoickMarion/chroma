@@ -258,6 +258,8 @@ class Surface(object):
         self.set('reemit', 0)
         self.set('reflect_diffuse', 0)
         self.set('reflect_specular', 0)
+        self.set('reflect_lobed', 0)  
+        self.set('sigma_alpha', 0)     
         self.set('eta', 0)
         self.set('k', 0)
         self.set('reemission_cdf', 0)

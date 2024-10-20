@@ -51,7 +51,6 @@ struct Surface
     float *reflect_diffuse;                         //probability that a photon reflects diffusively
     float *reflect_specular;                        //probability that a photon reflects specularly (or specular spike in lobed model)
     float *reflect_lobed;                           //probability that a photon undergoes lobed reflection (only for lobed model)
-    float *backscatter;                             //probability that a photon backstatters upon reflection (only for lobed model)
     float *sigma_alpha;                             //standarad deviation for the normal distribution that the specular lobe perturbation is picked from
     float *eta;
     float *k;
@@ -65,6 +64,8 @@ struct Surface
     float wavelength_step;
     float wavelength_start;
     float thickness;
+
+
 };
 
 struct Triangle

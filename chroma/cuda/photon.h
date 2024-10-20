@@ -417,39 +417,254 @@ backscatter_reflection(Photon &p, State &s)
 
 } // backscatter_reflection
 
-__device__ int
-specular_lobed_reflection(Photon &p, State &s, curandState &rng, Surface* surface){
+/*
+Method to calculate the reflectance based on the Fresnel Equations. First Snell's law is used to calculated the refracted angle
 
-    //initially reflect the photon fully specularly
-    float3 p_projection = s.surface_normal * (dot(s.surface_normal, p.direction));
-    p.direction = p.direction - 2.0f * p_projection;
+Next, R_s and R_p are calculated using Fresnel equations. The standard equation can be algebraically manipulated to get into this form:
 
-    //initialize parameters that will calculate the deviation from the purely specular reflection
-    float sigma_alpha = *(surface->sigma_alpha);
-    float max_deviation = fmin(1.0f, 4.0f * sigma_alpha);
+    R_s_num = (n1**2 + k1**2) * cos_th_1**2 - 2 * (n1*n2 + k1*k2) * cos_th_1 * cos_th_2 + (n2**2 + k2**2) * cos2_th_2 
+    R_s_denom = (n1**2 + k1**2) * cos_th_1**2 + 2 * (n1*n2 + k1*k2) * cos_th_1 * cos_th_2 + (n2**2 + k2**2) * cos2_th_2 
+
+    R_s = R_s_num/R_s_denom
+
+    R_p_num = (n1**2 + k1**2) * cos2_th_2 - 2 * (n1*n2 + k1*k2) * cos_th_1 * cos_th_2 + (n2**2 + k2**2) * cos_th_1**2
+    R_p_denom = (n1**2 + k1**2) * cos2_th_2 + 2 * (n1*n2 + k1*k2) * cos_th_1 * cos_th_2 + (n2**2 + k2**2) * cos_th_1**2
+
+    R_p = R_p_num/R_p_denom
+
+Intermediate steps which are used repeatedly are stored in memory to make calculation faster
+ */
+__device__ float
+calculate_fresnel_reflectance(float n1, float k1,float n2,float k2,Photon &p, float3 surface_normal){
+    // assuming unit vectors, dot product is equal to cosine of angle between them
+    float cos_th1 = dot(p.direction, surface_normal);
+    //incident angle is defined from 0 to pi/2
+    if(cos_th1 < 0.0f){
+        cos_th1 = -cos_th1;
+    }
+
+    // if perpendicular incident, reflectance equation simplifies
+    // formula is ((n1 - n2)**2 + (k1-k2)**2)/ ((n1 + n2)**2 + (k1 + k2)**2)
+    // intermediate steps are saved to run faster
+    if (cos_th1 < 1e-6f){
+        float n1_minus_n2 = n1 - n2;
+        float k1_minus_k2 = k1 - k2;
+        float n1_plus_n2 = n1 + n2;
+        float k1_plus_k2 = k1 + k2;
+
+        float numerator = n1_minus_n2 * n1_minus_n2 + k1_minus_k2 * k1_minus_k2;
+        float denominator = n1_plus_n2 * n1_plus_n2 + k1_plus_k2 * k1_plus_k2;
+
+        return numerator / denominator; 
+    }
+
+    //calculate R_s and R_p, saving repeated intermediate values
+
+    float n1_sq_plus_k1_sq = n1 * n1 + k1 * k1;
+    float n2_sq_plus_k2_sq = n2 * n2 + k2 * k2;
+    float n1n2_k1k2 = n1 * n2 + k1 * k2;
+
+    float cos_th1_sq = cos_th1 * cos_th1;
+
+    //snells law (square both sides and replace sin^2 with 1-cos^2)
+    float cos_th2_sq = 1 - n1_sq_plus_k1_sq / n2_sq_plus_k2_sq * (1- cos_th1_sq);
+     if (cos_th2_sq < 0.0f) {
+        cos_th2_sq = 0.0f;
+    }
+    float cos_th2 = sqrt(cos_th2_sq);
+    float cos_th1_cos_th2 = cos_th1;
+
+
+    float Rs_numerator = n1_sq_plus_k1_sq * cos_th1_sq - 2 * n1n2_k1k2 * cos_th1_cos_th2 + n2_sq_plus_k2_sq * cos_th2_sq;
+    float Rs_denominator = n1_sq_plus_k1_sq * cos_th1_sq + 2 * n1n2_k1k2 * cos_th1_cos_th2 + n2_sq_plus_k2_sq * cos_th2_sq;
+
+    float Rp_numerator = n1_sq_plus_k1_sq * cos_th2_sq - 2 * n1n2_k1k2 * cos_th1_cos_th2 + n2_sq_plus_k2_sq * cos_th1_sq;
+    float Rp_denominator = n1_sq_plus_k1_sq * cos_th2_sq + 2 * n1n2_k1k2 * cos_th1_cos_th2 + n2_sq_plus_k2_sq * cos_th1_sq;
+
+    float R_s = Rs_numerator / Rs_denominator;
+    float R_p = Rp_numerator / Rp_denominator;
+
+    //code directly copied from existing code in dielectric surface
+
+    
+    float3 incident_plane_normal = cross(p.direction, surface_normal);
+    float incident_plane_normal_length = norm(incident_plane_normal);
+
+    if (incident_plane_normal_length < 1e-6f)
+        incident_plane_normal = p.polarization;
+    else
+        incident_plane_normal /= incident_plane_normal_length;
+
+    float normal_coefficient = dot(p.polarization, incident_plane_normal);
+    float normal_probability = normal_coefficient * normal_coefficient; // i.e. s polarization fraction
+
+    float reflect = normal_probability * R_s + (1.0f - normal_probability) * R_p;
+    return .05;
+    return reflect;
+}
+// calculate_fresnel_reflectance
+
+//method to get facet normal, adapted from geant4 source code excerpt written by Peter Gumplinger
+__device__ float3
+get_facet_normal(Photon &p, State &s, curandState &rng, float sigma_alpha){
+    float f_max = fmin(1.0f, 4.0f * sigma_alpha);
     float alpha;
     float phi;
     float sin_alpha;
 
-    //choose angle values and create the perturbation angle
+    float3 facet_normal;
+
     do {
         do {
             alpha = sample_gaussian(&rng, 0.0f, sigma_alpha); //pick a perturbation angle from a gaussian dsitribution
             sin_alpha = sin(alpha);
             
-        } while (curand_uniform(&rng) * max_deviation > sin_alpha || alpha > M_PI_2);
+        } while (curand_uniform(&rng) * f_max > sin_alpha || alpha > M_PI_2);
 
         phi = curand_uniform(&rng) * 2.0f * M_PI;
-        float3 perturbation = make_float3(sin_alpha * cos(phi), sin_alpha * sin(phi), cos(alpha));
-        p.direction += perturbation;    // add the perturbation angle to the specular reflection.
+        facet_normal = make_float3(sin_alpha * cos(phi), sin_alpha * sin(phi), cos(alpha));
+        facet_normal = rotate_zbasis_to_target_basis(facet_normal, s.surface_normal);
 
-    } while(dot(p.direction, s.surface_normal) > 0); //make sure the reflection travels away from the surface
+    } while (false); //(dot(p.direction, s.surface_normal) <= 0); //make sure the reflection travels away from the surface
 
-    p.history |= REFLECT_LOBED;
-    //do i change polarization?
+    return facet_normal;
 
-    return CONTINUE;
 }
+
+__device__ int
+propagate_at_specularLobe(Photon &p, State &s, curandState &rng, Surface* surface, bool useWeights = false){
+
+    float detect = interp_property(surface, p.wavelength, surface->detect);
+    float reflect_specular = interp_property(surface, p.wavelength, surface->reflect_specular);
+    // float reflect_specular = .25;
+    float reflect_diffuse = interp_property(surface, p.wavelength, surface->reflect_diffuse);
+    // float reflect_diffuse = 0.5;
+    float reflect_lobed = interp_property(surface, p.wavelength, surface->reflect_lobed);
+    // float reflect_lobed = *surface->reflect_lobed;
+    // float sigma_alpha = interp_property(surface, p.wavelength, surface->sigma_alpha);
+    float sigma_alpha = .1;
+
+
+    // // n1 = n1_eta + i * n2_k (complex)
+    // float n1_eta = s.refractive_index1;
+    // float n1_k = s.refractive_index2;
+    // // n2 = n2_eta + i * n2_k (complex)
+    // float n2_eta = interp_property(surface, p.wavelength, surface->eta);
+    // float n2_k = interp_property(surface, p.wavelength, surface->k);
+
+    int reflection_type;
+    float3 facet_normal = s.surface_normal;
+
+    float uniform_sample_reflect = curand_uniform(&rng);
+    //reflect diffusively if reflected
+    if (uniform_sample_reflect < reflect_diffuse)
+        reflection_type = 0;
+    //reflect specularly if reflected
+    else if (uniform_sample_reflect < reflect_diffuse + reflect_specular)
+        reflection_type = 1;
+    //reflect lobed if reflected
+    else if (uniform_sample_reflect < reflect_diffuse + reflect_specular + reflect_lobed) {
+        reflection_type = 2;
+        facet_normal = get_facet_normal(p, s, rng, sigma_alpha);
+    }
+    //reflect backscatter
+    else
+        reflection_type = 3;
+    
+    // float reflect = 1;
+    // float reflect = calculate_fresnel_reflectance(n1_eta,n1_k,n2_eta,n2_k,p,facet_normal);
+
+
+    float n1 = s.refractive_index1;
+    // n2 = n2_eta + i * n2_k (complex)
+    float n2_eta = interp_property(surface, p.wavelength, surface->eta);
+    float n2_k = interp_property(surface, p.wavelength, surface->k);
+
+    float cos_t1 = dot(p.direction, s.surface_normal);
+    if (cos_t1 < 0.0f)
+        cos_t1 = -cos_t1;
+    float sin2_t1 = 1.0f - cos_t1 * cos_t1;
+
+    // n2 cos_t2 = u2 + i * v2
+    float eta22_k22 = n2_eta * n2_eta - n2_k * n2_k;
+    float eta2k2 = n2_eta * n2_k;
+    float A = eta22_k22 - n1 * n1 * sin2_t1;
+    float B = sqrt(A * A + 4.0f * eta2k2 * eta2k2);
+    float u2 = sqrt((A + B) / 2.0f);
+    float v22 = (-A + B) / 2.0f;
+    float v2 = sqrt(v22);
+
+    // s polarization
+    float s_num1 = n1 * cos_t1 - u2;
+    float s_denom1 = n1 * cos_t1 + u2;
+    float R_s = (s_num1 * s_num1 + v22) / (s_denom1 * s_denom1 + v22);
+
+    // p polarization
+    float p_num1 = eta22_k22 * cos_t1 - n1 * u2;
+    float p_num2 = 2.0f * eta2k2 * cos_t1 - n1 * v2;
+    float p_denom1 = eta22_k22 * cos_t1 + n1 * u2;
+    float p_denom2 = 2.0f * eta2k2 * cos_t1 + n1 * v2;
+    float R_p = (p_num1 * p_num1 + p_num2 * p_num2) / (p_denom1 * p_denom1 + p_denom2 * p_denom2);
+
+    // calculate s polarization fraction, identical to propagate_at_boundary
+    float3 incident_plane_normal = cross(p.direction, s.surface_normal);
+    float incident_plane_normal_length = norm(incident_plane_normal);
+
+    if (incident_plane_normal_length < 1e-6f)
+        incident_plane_normal = p.polarization;
+    else
+        incident_plane_normal /= incident_plane_normal_length;
+
+    float normal_coefficient = dot(p.polarization, incident_plane_normal);
+    float normal_probability = normal_coefficient * normal_coefficient; // i.e. s polarization fraction
+
+    // transmission not allowed
+    float reflect = normal_probability * R_s + (1.0f - normal_probability) * R_p;
+    float absorb = 1.0f - reflect;
+    float uniform_sample = curand_uniform(&rng);
+
+    if (uniform_sample < reflect) {
+        if (reflection_type == 0)
+            return propagate_at_diffuse_reflector(p, s, rng);
+        else if (reflection_type == 1)
+            return propagate_at_specular_reflector(p, s);
+        
+        else if (reflection_type == 2){
+               float PdotN = dot(p.direction, facet_normal);
+                p.direction = p.direction - (2. * PdotN) * facet_normal;
+
+                float edotN = dot(p.polarization, facet_normal);
+                p.polarization = -p.polarization + (2. * edotN) * facet_normal;
+
+                //if the reflection goes back into surface, reflect again, else, continue
+
+                p.history |= REFLECT_LOBED;
+                if(dot(p.direction, s.surface_normal) < 0){
+                    // console.log("rereflecting");
+                    return propagate_at_specularLobe(p,s, rng,surface);
+                }
+                else{
+                    return CONTINUE;
+                }
+        }
+        else    
+            return backscatter_reflection(p,s);
+
+    }
+    else {
+        // absorb
+        // detection probability is conditional on absorption here
+        float uniform_sample_detect = curand_uniform(&rng);
+        if (uniform_sample_detect < detect)
+            p.history |= SURFACE_DETECT;
+        else
+            p.history |= SURFACE_ABSORB;
+
+        return BREAK;
+    }
+        
+}
+
 __device__ int
 propagate_complex(Photon &p, State &s, curandState &rng, Surface* surface, bool use_weights=false)
 {
@@ -732,8 +947,6 @@ propagate_dielectric_metal(Photon &p, State &s, curandState &rng, Surface* surfa
     float R_p = (p_num1 * p_num1 + p_num2 * p_num2) / (p_denom1 * p_denom1 + p_denom2 * p_denom2);
 
     // calculate s polarization fraction, identical to propagate_at_boundary
-    float incident_angle = get_theta(s.surface_normal,-p.direction);
-
     float3 incident_plane_normal = cross(p.direction, s.surface_normal);
     float incident_plane_normal_length = norm(incident_plane_normal);
 
@@ -793,9 +1006,9 @@ propagate_at_sipmEmpirical(Photon &p, State &s, curandState &rng, Surface *surfa
     }
     
     const SiPMEmpiricalProps *props = surface->sipmEmpirical_props;
-    float idx = interp_idx(incident_angle,props->nangles,props->angles);
+                                                                                    float idx = interp_idx(incident_angle,props->nangles,props->angles);
 
-    unsigned int iidx = (int)idx;
+                                                                                    unsigned int iidx = (int)idx;
     
     float reflect_prob_low = interp_property(surface, p.wavelength, props->sipmEmpirical_reflect[iidx]);
     float reflect_prob_high = interp_property(surface, p.wavelength, props->sipmEmpirical_reflect[iidx+1]);
@@ -820,62 +1033,8 @@ propagate_at_sipmEmpirical(Photon &p, State &s, curandState &rng, Surface *surfa
 
         return BREAK;
     }
-} // propagate_at_sipmEmpirical
-
-__device__ int
-propagate_at_specularLobe(Photon &p, State &s, curandState &rng, Surface *surface, bool use_weights=false){
-    //calculate the probablity that a photon gets reflected
-    float reflect_prob = 0.5;
-    //maybe look into transmittance later idk
-
-    //read in hte porbabilities of each type of reflection from the surface struct (located in geometry_types.h)
-    float reflect_specular = interp_property(surface, p.wavelength, surface->reflect_specular);
-    float reflect_diffuse = interp_property(surface, p.wavelength, surface->reflect_diffuse);
-    float reflect_lobed = interp_property(surface, p.wavelength, surface->reflect_lobed);
-    float backscatter = interp_property(surface, p.wavelength, surface->backscatter);
-
-    //select a random number to decided if the photon gets reflected
-    float uniform_sample = curand_uniform(&rng);
-    if ((uniform_sample < reflect_prob)) {
-
-        //select another random number to determine which type of reflection occurs.
-        float reflection_type_prob = curand_uniform(&rng);
-
-        if ( reflection_type_prob < reflect_specular){
-            return propagate_at_specular_reflector(p, s);
-        }
-
-        else if (reflection_type_prob < reflect_specular + reflect_diffuse){
-            return propagate_at_diffuse_reflector(p, s, rng);
-        }
-        else if (reflection_type_prob < reflect_specular + reflect_diffuse + backscatter){
-            return backscatter_reflection(p,s);
-        }
-        else{
-
-        }
-    }
-
-    float3 p_projection = s.surface_normal * (dot(s.surface_normal, p.direction));
-    float3 specular_direction = p.direction - 2.0f * p_projection; 
-
-    float3 diffuse_direction = make_float3(0.0f, 0.0f, 0.0f);
-    float ndotv;
-    do {
-        diffuse_direction = uniform_sphere(&rng);
-        ndotv = dot(diffuse_direction, s.surface_normal);
-        if (ndotv < 0.0f) {
-            diffuse_direction = -diffuse_direction;
-            ndotv = -ndotv;
-        }
-    } while (! (curand_uniform(&rng) < ndotv) );
-
-    p.direction = (diffuse_direction + 2.0f * specular_direction)/ 3.0f;
-    p.history |= REFLECT_LOBED;
-
-    return CONTINUE;
-
 }
+
 __device__ int
 propagate_at_surface(Photon &p, State &s, curandState &rng, Geometry *geometry,
                      bool use_weights=false)

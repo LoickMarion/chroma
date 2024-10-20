@@ -79,7 +79,7 @@ setup(
  
     setup_requires = [],
     install_requires = ['uncertainties','pyzmq', 'pycuda', 
-                        'numpy>=1.6', 'pygame', 'nose', 'sphinx'],
+                        'numpy>=1.23', 'pygame', 'nose', 'sphinx'],
     #test_suite = 'nose.collector',
     
 )
