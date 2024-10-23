@@ -132,6 +132,11 @@ class GPUGeometry(object):
             k_gpu = ga.to_gpu(k)
             reemission_cdf = interp_material_property(wavelengths, surface.reemission_cdf)
             reemission_cdf_gpu = ga.to_gpu(reemission_cdf)
+            #my stuff
+            reflect_lobed = interp_material_property(wavelengths, surface.reflect_lobed)
+            reflect_lobed_gpu =  ga.to_gpu(reflect_lobed)
+            sigma_alpha = interp_material_property(wavelengths, surface.sigma_alpha)
+            sigma_alpha_gpu = ga.to_gpu(sigma_alpha)
             
             if surface.dichroic_props:
                 props = surface.dichroic_props
@@ -189,6 +194,8 @@ class GPUGeometry(object):
             self.surface_data.append(reemit_gpu)
             self.surface_data.append(reflect_diffuse_gpu)
             self.surface_data.append(reflect_specular_gpu)
+            self.surface_data.append(reflect_lobed_gpu)
+            self.surface_data.append(sigma_alpha_gpu)
             self.surface_data.append(reemission_cdf_gpu)
             self.surface_data.append(eta_gpu)
             self.surface_data.append(k_gpu)
@@ -199,6 +206,7 @@ class GPUGeometry(object):
                 make_gpu_struct(surface_struct_size,
                                 [detect_gpu, absorb_gpu, reemit_gpu,
                                  reflect_diffuse_gpu,reflect_specular_gpu,
+                                 reflect_lobed_gpu, sigma_alpha_gpu,
                                  eta_gpu, k_gpu, reemission_cdf_gpu,
                                  dichroic_props,
                                  sipmEmpirical_props,

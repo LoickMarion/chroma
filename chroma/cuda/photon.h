@@ -541,8 +541,8 @@ propagate_at_specularLobe(Photon &p, State &s, curandState &rng, Surface* surfac
     // float reflect_diffuse = 0.5;
     float reflect_lobed = interp_property(surface, p.wavelength, surface->reflect_lobed);
     // float reflect_lobed = *surface->reflect_lobed;
-    // float sigma_alpha = interp_property(surface, p.wavelength, surface->sigma_alpha);
-    float sigma_alpha = .1;
+    float sigma_alpha = interp_property(surface, p.wavelength, surface->sigma_alpha);
+    // float sigma_alpha = .1;
 
 
     // // n1 = n1_eta + i * n2_k (complex)
