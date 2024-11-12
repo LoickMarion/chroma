@@ -74,4 +74,40 @@ interp_property(T *m, const float &x, const float *fp)
     return fp[jl] + (x-(m->wavelength_start + jl*m->wavelength_step))*(fp[jl+1]-fp[jl])/m->wavelength_step;
 }
 
+template <class T>
+__device__ float
+bilinear_interp_property(T *m, const float &wavelength, const float &angle, const float *fp)
+{
+    int angle_index = angle / m->angle_step;
+
+    // if less than starting wavelength, interpolated angle using minimum wavelength
+    if (wavelength < m->wavelength_start){
+        return fp[m->num_wavelengths * angle_index] + (angle - angle_index * m->angle_step)/ m->angle_step * (fp[m->num_wavelengths * (angle_index + 1)] - fp[m->num_wavelengths * angle_index]);
+    }
+
+    //if wavelength greater than ending wavelength, interpolate over angle using maximum wavelength
+    else if(wavelength >= m->wavelength_end){
+        return fp[m->num_wavelengths * (angle_index + 1) - 1] + (angle - angle_index * m->angle_step)/m->angle_step * (fp[m->num_wavelengths * (angle_index + 2) - 1] - fp[m->num_wavelengths * (angle_index + 1) - 1]);
+    }
+    
+    else {
+        int wavelength_index = (wavelength - m->wavelength_start)/ m->wavelength_step;
+
+        //find the 4 gridpoints for interpolation
+        float lower_angle_lower_wl = fp[m->num_wavelengths * angle_index + wavelength_index];
+        float lower_angle_upper_wl = fp[m->num_wavelengths * angle_index + wavelength_index + 1];
+        float upper_angle_lower_wl = fp[m->num_wavelengths * (angle_index + 1) + wavelength_index];
+        float upper_angle_upper_wl = fp[m->num_wavelengths * (angle_index + 1) + wavelength_index + 1];
+
+        float lower_angle_wl_interp = lower_angle_lower_wl + (wavelength - (m->wavelength_start + wavelength_index * m->wavelength_step))/m->wavelength_step * (lower_angle_upper_wl - lower_angle_lower_wl);
+        float upper_angle_wl_interp = upper_angle_lower_wl + (wavelength - (m->wavelength_start + wavelength_index * m->wavelength_step))/m->wavelength_step * (upper_angle_upper_wl - upper_angle_lower_wl);
+
+        return lower_angle_wl_interp + (angle - angle_index * m->angle_step)/m->angle_step * (upper_angle_wl_interp - lower_angle_wl_interp)
+
+    }
+}
+
+
+
+
 #endif
