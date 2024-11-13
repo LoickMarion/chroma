@@ -34,6 +34,7 @@ class GPUGeometry(object):
         surface_struct_size = characterize.sizeof('Surface', geometry_source)
         dichroicprops_struct_size = characterize.sizeof('DichroicProps', geometry_source)
         simpempiricalprops_struct_size = characterize.sizeof('SiPMEmpiricalProps', geometry_source)
+        arrayprops2d_struct_size = characterize.sizeof('ArrayProps2D', geometry_source)
         geometry_struct_size = characterize.sizeof('Geometry', geometry_source)
 
         self.material_data = []
@@ -132,7 +133,7 @@ class GPUGeometry(object):
             k_gpu = ga.to_gpu(k)
             reemission_cdf = interp_material_property(wavelengths, surface.reemission_cdf)
             reemission_cdf_gpu = ga.to_gpu(reemission_cdf)
-            #my stuff
+
             reflect_lobed = interp_material_property(wavelengths, surface.reflect_lobed)
             reflect_lobed_gpu =  ga.to_gpu(reflect_lobed)
             sigma_alpha = interp_material_property(wavelengths, surface.sigma_alpha)
@@ -189,6 +190,26 @@ class GPUGeometry(object):
             else:
                 sipmEmpirical_props = np.uint64(0) #NULL
 
+
+            if self.array_props_2D:
+                # Prepare lists to hold the pointers for 2D property arrays
+                array2D_pointers = []
+                for array_2d in self.array_props_2D:
+                    # Flatten the 2D array and send it to the GPU
+                    array_1d_gpu = ga.to_gpu(np.asarray(array_2d, dtype=np.float32).flatten())
+                    self.surface_data.append(array_1d_gpu)
+                    array2D_pointers.append(array_1d_gpu)
+
+                # Construct a single GPU structure for the 2D array properties
+                array2D_arr_gpu = make_gpu_struct(8 * len(array2D_pointers), array2D_pointers)
+                self.surface_data.append(array2D_arr_gpu)
+
+                # Final structure for array_props_2D, adding `len(array2D_pointers)` for metadata
+                array_props2D = make_gpu_struct(arrayprops2d_struct_size, [array2D_arr_gpu, np.uint32(len(array2D_pointers))])
+            else: 
+                array_props2D = np.uint64(0)
+                
+
             self.surface_data.append(detect_gpu)
             self.surface_data.append(absorb_gpu)
             self.surface_data.append(reemit_gpu)
@@ -201,6 +222,7 @@ class GPUGeometry(object):
             self.surface_data.append(k_gpu)
             self.surface_data.append(dichroic_props)
             self.surface_data.append(sipmEmpirical_props)
+            self.surface_data.append(array_props2D)
             
             surface_gpu = \
                 make_gpu_struct(surface_struct_size,

@@ -247,6 +247,12 @@ class SiPMEmpiricalProps(object):
         self.sipmEmpirical_reflect = np.asarray(reflect)
         self.sipmEmpirical_relativePDE = np.asarray(relativePDE)
 
+class ArrayProps2D(object):
+    def __init__(self, reflect, transmit, detect):
+        self.reflect = reflect
+        self.transmit = transmit
+        self.transmit = detect
+
 class Surface(object):
     """Surface optical properties."""
     def __init__(self, name='none', model=0):
@@ -266,6 +272,7 @@ class Surface(object):
         
         self.dichroic_props = None
         self.sipmEmpirical_props = None
+        self.array_props_2D = None
 
         self.thickness = 0.0
         self.transmissive = 0
@@ -279,6 +286,8 @@ class Surface(object):
 
         if (np.asarray(value) < 0.0).any():
             raise Exception('all probabilities must be >= 0.0')
+        if (np.asarray(value) > 1.0).any():
+            raise Exception('all probabilities must be <= 1.0')
 
         self.__dict__[name] = np.array(list(zip(wavelengths, value)), dtype=np.float32)
     def __repr__(self):
