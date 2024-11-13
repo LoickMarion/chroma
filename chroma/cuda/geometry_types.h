@@ -43,6 +43,13 @@ struct SiPMEmpiricalProps
     unsigned int nangles;
 };
 
+struct ArrayProps2D{
+    float *reflect;
+    float *transmit;
+    float *detect;
+    unsigned int nangles;
+};
+
 struct Surface
 {
     float *detect;  
@@ -51,13 +58,13 @@ struct Surface
     float *reflect_diffuse;                         //probability that a photon reflects diffusively
     float *reflect_specular;                        //probability that a photon reflects specularly (or specular spike in lobed model)
     float *reflect_lobed;                           //probability that a photon undergoes lobed reflection (only for lobed model)
-    float *sigma_alpha;                             //standarad deviation for the normal distribution that the specular lobe perturbation is picked from
+    float *sigma_alpha;                             //standarad deviation for the normal distribution that the specular lobe perturbation is picked from (only for lobed model)
     float *eta;
     float *k;
     float *reemission_cdf;
     DichroicProps *dichroic_props;
     SiPMEmpiricalProps *sipmEmpirical_props;
- 
+    ArrayProps2D *array_props_2D;
     unsigned int model;
     unsigned int wavelength_n;
     unsigned int transmissive;
