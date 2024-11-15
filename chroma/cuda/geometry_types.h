@@ -71,6 +71,7 @@ struct Surface
     float wavelength_step;
     float wavelength_start;
     float thickness;
+    float num_angles;
 
 
 };

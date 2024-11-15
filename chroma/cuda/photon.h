@@ -534,7 +534,6 @@ get_facet_normal(Photon &p, State &s, curandState &rng, float sigma_alpha){
 __device__ int
 propagate_at_specularLobe(Photon &p, State &s, curandState &rng, Surface* surface, bool useWeights = false){
 
-    float detect = interp_property(surface, p.wavelength, surface->detect);
     float reflect_specular = interp_property(surface, p.wavelength, surface->reflect_specular);
     // float reflect_specular = .25;
     float reflect_diffuse = interp_property(surface, p.wavelength, surface->reflect_diffuse);
@@ -545,12 +544,12 @@ propagate_at_specularLobe(Photon &p, State &s, curandState &rng, Surface* surfac
     // float sigma_alpha = .1;
 
 
-    // // n1 = n1_eta + i * n2_k (complex)
-    // float n1_eta = s.refractive_index1;
-    // float n1_k = s.refractive_index2;
-    // // n2 = n2_eta + i * n2_k (complex)
-    // float n2_eta = interp_property(surface, p.wavelength, surface->eta);
-    // float n2_k = interp_property(surface, p.wavelength, surface->k);
+    // n1 = n1_eta + i * n2_k (complex)
+    float n1_eta = s.refractive_index1;
+    float n1_k = s.refractive_index2;
+    // n2 = n2_eta + i * n2_k (complex)
+    float n2_eta = interp_property(surface, p.wavelength, surface->eta);
+    float n2_k = interp_property(surface, p.wavelength, surface->k);
 
     int reflection_type;
     float3 facet_normal = s.surface_normal;
@@ -571,55 +570,52 @@ propagate_at_specularLobe(Photon &p, State &s, curandState &rng, Surface* surfac
     else
         reflection_type = 3;
     
-    // float reflect = 1;
-    // float reflect = calculate_fresnel_reflectance(n1_eta,n1_k,n2_eta,n2_k,p,facet_normal);
+    float reflect;
+    float transmit;
+    float detect;
+
+    if(surface->array_props_2D){
+
+        float cos_t1 = dot(s.surface_normal,-p.direction);
+        float incident_angle;
+        if (fabsf(cos_t1) < 1.0f-1e-6f) {
+            incident_angle = acosf(cos_t1);
+        } else {
+            incident_angle = 0.0f;
+        }
+        //use bilinear interpolation if the reflect table exists
+        if(surface->array_props_2D->reflect){
+            reflect = bilinear_interp_property(surface,p.wavelength,incident_angle,surface->array_props_2D->reflect);
+        }
+        else{
+            reflect = calculate_fresnel_reflectance(n1_eta,n1_k,n2_eta,n2_k,p,facet_normal);
+        }
+
+        //use bilinear interpolation if the transmit table exists
+        if(surface->array_props_2D->transmit){
+            transmit = bilinear_interp_property(surface,p.wavelength,incident_angle,surface->array_props_2D->reflect);
+        }
+        else{
+            transmit = 0;
+        }
+
+        //use bilinear interpolation if the detect table exists
+        if(surface->array_props_2D->reflect){
+            detect = bilinear_interp_property(surface,p.wavelength,incident_angle,surface->array_props_2D->reflect);
+        }
+        else{
+            detect = calculate_fresnel_reflectance(n1_eta,n1_k,n2_eta,n2_k,p,facet_normal);
+        }
+    }
+    else{
+        reflect = calculate_fresnel_reflectance(n1_eta,n1_k,n2_eta,n2_k,p,facet_normal);
+        // add this in float transmit = calculate_fresnel_transmittance
+        transmit = 0.0f;
+        detect = interp_property(surface, p.wavelength, surface->detect);
+    }
 
 
-    float n1 = s.refractive_index1;
-    // n2 = n2_eta + i * n2_k (complex)
-    float n2_eta = interp_property(surface, p.wavelength, surface->eta);
-    float n2_k = interp_property(surface, p.wavelength, surface->k);
-
-    float cos_t1 = dot(p.direction, s.surface_normal);
-    if (cos_t1 < 0.0f)
-        cos_t1 = -cos_t1;
-    float sin2_t1 = 1.0f - cos_t1 * cos_t1;
-
-    // n2 cos_t2 = u2 + i * v2
-    float eta22_k22 = n2_eta * n2_eta - n2_k * n2_k;
-    float eta2k2 = n2_eta * n2_k;
-    float A = eta22_k22 - n1 * n1 * sin2_t1;
-    float B = sqrt(A * A + 4.0f * eta2k2 * eta2k2);
-    float u2 = sqrt((A + B) / 2.0f);
-    float v22 = (-A + B) / 2.0f;
-    float v2 = sqrt(v22);
-
-    // s polarization
-    float s_num1 = n1 * cos_t1 - u2;
-    float s_denom1 = n1 * cos_t1 + u2;
-    float R_s = (s_num1 * s_num1 + v22) / (s_denom1 * s_denom1 + v22);
-
-    // p polarization
-    float p_num1 = eta22_k22 * cos_t1 - n1 * u2;
-    float p_num2 = 2.0f * eta2k2 * cos_t1 - n1 * v2;
-    float p_denom1 = eta22_k22 * cos_t1 + n1 * u2;
-    float p_denom2 = 2.0f * eta2k2 * cos_t1 + n1 * v2;
-    float R_p = (p_num1 * p_num1 + p_num2 * p_num2) / (p_denom1 * p_denom1 + p_denom2 * p_denom2);
-
-    // calculate s polarization fraction, identical to propagate_at_boundary
-    float3 incident_plane_normal = cross(p.direction, s.surface_normal);
-    float incident_plane_normal_length = norm(incident_plane_normal);
-
-    if (incident_plane_normal_length < 1e-6f)
-        incident_plane_normal = p.polarization;
-    else
-        incident_plane_normal /= incident_plane_normal_length;
-
-    float normal_coefficient = dot(p.polarization, incident_plane_normal);
-    float normal_probability = normal_coefficient * normal_coefficient; // i.e. s polarization fraction
-
-    // transmission not allowed
-    float reflect = normal_probability * R_s + (1.0f - normal_probability) * R_p;
+    
     float absorb = 1.0f - reflect;
     float uniform_sample = curand_uniform(&rng);
 

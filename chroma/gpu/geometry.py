@@ -191,7 +191,7 @@ class GPUGeometry(object):
                 sipmEmpirical_props = np.uint64(0) #NULL
 
 
-            if self.array_props_2D:
+            if surface.array_props_2D:
                 # Prepare lists to hold the pointers for 2D property arrays
                 array2D_pointers = []
                 for array_2d in self.array_props_2D:
@@ -232,13 +232,15 @@ class GPUGeometry(object):
                                  eta_gpu, k_gpu, reemission_cdf_gpu,
                                  dichroic_props,
                                  sipmEmpirical_props,
+                                 array_props2D,
                                  np.uint32(surface.model),
                                  np.uint32(len(wavelengths)),
                                  np.uint32(surface.transmissive),
                                  np.float32(wavelength_step),
                                  np.float32(wavelengths[0]),
-                                 np.float32(surface.thickness)])
-
+                                 np.float32(surface.thickness),
+                                 np.uint32(surface.num_angles),                                 
+                                 ])
             self.surface_ptrs.append(surface_gpu)
 
         self.surface_pointer_array = \

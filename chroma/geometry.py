@@ -248,10 +248,12 @@ class SiPMEmpiricalProps(object):
         self.sipmEmpirical_relativePDE = np.asarray(relativePDE)
 
 class ArrayProps2D(object):
-    def __init__(self, reflect, transmit, detect):
+    def __init__(self, reflect, transmit, detect, num_angles):
         self.reflect = reflect
         self.transmit = transmit
         self.transmit = detect
+        self.num_angles = num_angles
+        # maybe calculate the angle step here to avoid recalculating?
 
 class Surface(object):
     """Surface optical properties."""
@@ -276,6 +278,7 @@ class Surface(object):
 
         self.thickness = 0.0
         self.transmissive = 0
+        self.num_angles = 0
 
     def set(self, name, value, wavelengths=standard_wavelengths):
         if np.iterable(value):
@@ -286,8 +289,6 @@ class Surface(object):
 
         if (np.asarray(value) < 0.0).any():
             raise Exception('all probabilities must be >= 0.0')
-        if (np.asarray(value) > 1.0).any():
-            raise Exception('all probabilities must be <= 1.0')
 
         self.__dict__[name] = np.array(list(zip(wavelengths, value)), dtype=np.float32)
     def __repr__(self):

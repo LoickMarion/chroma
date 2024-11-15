@@ -3,6 +3,7 @@
 
 #include "geometry_types.h"
 #include "linalg.h"
+#include "physical_constants.h"
 
 __device__ float3 
 to_float3(const uint3 &a)
@@ -78,31 +79,32 @@ template <class T>
 __device__ float
 bilinear_interp_property(T *m, const float &wavelength, const float &angle, const float *fp)
 {
-    int angle_index = angle / m->angle_step;
+    float angle_step = PI/(2.0f * m->num_angles);
+    int angle_index = angle / angle_step;
 
     // If less than starting wavelength, interpolate along angle using minimum wavelength
     if (wavelength < m->wavelength_start) {
-        float angle_frac = (angle - angle_index * m->angle_step) / m->angle_step;
-        return fp[m->num_wavelengths * angle_index] + angle_frac * (fp[m->num_wavelengths * (angle_index + 1)] - fp[m->num_wavelengths * angle_index]);
+        float angle_frac = (angle - angle_index * angle_step) / angle_step;
+        return fp[m->wavelength_n * angle_index] + angle_frac * (fp[m->wavelength_n * (angle_index + 1)] - fp[m->wavelength_n * angle_index]);
     }
 
     // If wavelength is greater than ending wavelength, interpolate along angle using maximum wavelength
-    else if (wavelength >= m->wavelength_end) {
-        float angle_frac = (angle - angle_index * m->angle_step) / m->angle_step;
-        return fp[m->num_wavelengths * (angle_index + 1) - 1] + angle_frac * (fp[m->num_wavelengths * (angle_index + 2) - 1] - fp[m->num_wavelengths * (angle_index + 1) - 1]);
+    else if (wavelength >= (m->wavelength_start + (m->wavelength_n-1)*m->wavelength_step)) {
+        float angle_frac = (angle - angle_index * angle_step) / angle_step;
+        return fp[m->wavelength_n * (angle_index + 1) - 1] + angle_frac * (fp[m->wavelength_n * (angle_index + 2) - 1] - fp[m->wavelength_n * (angle_index + 1) - 1]);
     }
     
     // For intermediate values, perform bilinear interpolation
     else {
         int wavelength_index = (wavelength - m->wavelength_start) / m->wavelength_step;
         float wavelength_frac = (wavelength - (m->wavelength_start + wavelength_index * m->wavelength_step)) / m->wavelength_step;
-        float angle_frac = (angle - angle_index * m->angle_step) / m->angle_step;
+        float angle_frac = (angle - angle_index * angle_step) / angle_step;
 
         // Find the 4 grid points for interpolation
-        float lower_angle_lower_wl = fp[m->num_wavelengths * angle_index + wavelength_index];
-        float lower_angle_upper_wl = fp[m->num_wavelengths * angle_index + wavelength_index + 1];
-        float upper_angle_lower_wl = fp[m->num_wavelengths * (angle_index + 1) + wavelength_index];
-        float upper_angle_upper_wl = fp[m->num_wavelengths * (angle_index + 1) + wavelength_index + 1];
+        float lower_angle_lower_wl = fp[m->wavelength_n * angle_index + wavelength_index];
+        float lower_angle_upper_wl = fp[m->wavelength_n * angle_index + wavelength_index + 1];
+        float upper_angle_lower_wl = fp[m->wavelength_n * (angle_index + 1) + wavelength_index];
+        float upper_angle_upper_wl = fp[m->wavelength_n * (angle_index + 1) + wavelength_index + 1];
 
         // Interpolate in the wavelength direction for both angles
         float lower_angle_wl_interp = lower_angle_lower_wl + wavelength_frac * (lower_angle_upper_wl - lower_angle_lower_wl);
