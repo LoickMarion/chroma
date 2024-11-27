@@ -574,6 +574,7 @@ propagate_at_specularLobe(Photon &p, State &s, curandState &rng, Surface* surfac
     float transmit;
     float detect;
 
+    //use the provided table if it exists
     if(surface->array_props_2D){
 
         float cos_t1 = dot(s.surface_normal,-p.direction);
@@ -598,20 +599,20 @@ propagate_at_specularLobe(Photon &p, State &s, curandState &rng, Surface* surfac
         else{
             transmit = 0;
         }
-
         //use bilinear interpolation if the detect table exists
         if(surface->array_props_2D->reflect){
             detect = bilinear_interp_property(surface,p.wavelength,incident_angle,surface->array_props_2D->reflect);
         }
         else{
-            detect = calculate_fresnel_reflectance(n1_eta,n1_k,n2_eta,n2_k,p,facet_normal);
+            detect = 0;
         }
     }
     else{
-        reflect = calculate_fresnel_reflectance(n1_eta,n1_k,n2_eta,n2_k,p,facet_normal);
+        // reflect = calculate_fresnel_reflectance(n1_eta,n1_k,n2_eta,n2_k,p,facet_normal);
         // add this in float transmit = calculate_fresnel_transmittance
         transmit = 0.0f;
-        detect = interp_property(surface, p.wavelength, surface->detect);
+        reflect = 0.0f;
+        // detect = interp_property(surface, p.wavelength, surface->detect);
     }
 
 

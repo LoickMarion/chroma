@@ -192,21 +192,20 @@ class GPUGeometry(object):
 
 
             if surface.array_props_2D:
-                # Prepare lists to hold the pointers for 2D property arrays
-                array2D_pointers = []
-                for array_2d in self.array_props_2D:
-                    # Flatten the 2D array and send it to the GPU
-                    array_1d_gpu = ga.to_gpu(np.asarray(array_2d, dtype=np.float32).flatten())
-                    self.surface_data.append(array_1d_gpu)
-                    array2D_pointers.append(array_1d_gpu)
+                print(f"{surface.name} array props found")
+                reflect_gpu = ga.to_gpu(np.asarray(surface.array_props_2D.reflect, dtype=np.float32).flatten()) if surface.array_props_2D.reflect is not None else None
+                self.surface_data.append(reflect_gpu)
 
-                # Construct a single GPU structure for the 2D array properties
-                array2D_arr_gpu = make_gpu_struct(8 * len(array2D_pointers), array2D_pointers)
-                self.surface_data.append(array2D_arr_gpu)
+                detect_gpu = ga.to_gpu(np.asarray(surface.array_props_2D.detect, dtype=np.float32).flatten()) if surface.array_props_2D.detect is not None else None
+                self.surface_data.append(detect_gpu)
 
-                # Final structure for array_props_2D, adding `len(array2D_pointers)` for metadata
-                array_props2D = make_gpu_struct(arrayprops2d_struct_size, [array2D_arr_gpu, np.uint32(len(array2D_pointers))])
-            else: 
+                transmit_gpu = ga.to_gpu(np.asarray(surface.array_props_2D.transmit, dtype=np.float32).flatten()) if surface.array_props_2D.transmit is not None else None
+                self.surface_data.append(transmit_gpu)
+
+                # Create the final structure with metadata
+                array_props2D = make_gpu_struct(arrayprops2d_struct_size, [reflect_gpu,detect_gpu,transmit_gpu])  # 3 arrays: reflect, detect, transmit
+            else:
+                print(f"{surface.name} no array props")
                 array_props2D = np.uint64(0)
                 
 

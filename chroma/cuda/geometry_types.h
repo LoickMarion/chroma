@@ -47,7 +47,6 @@ struct ArrayProps2D{
     float *reflect;
     float *transmit;
     float *detect;
-    unsigned int nangles;
 };
 
 struct Surface
@@ -71,7 +70,7 @@ struct Surface
     float wavelength_step;
     float wavelength_start;
     float thickness;
-    float num_angles;
+    int num_angles;
 
 
 };

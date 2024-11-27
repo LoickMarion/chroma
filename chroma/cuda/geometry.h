@@ -96,6 +96,7 @@ bilinear_interp_property(T *m, const float &wavelength, const float &angle, cons
     
     // For intermediate values, perform bilinear interpolation
     else {
+        // Calculate the wavelength index and fractional part
         int wavelength_index = (wavelength - m->wavelength_start) / m->wavelength_step;
         float wavelength_frac = (wavelength - (m->wavelength_start + wavelength_index * m->wavelength_step)) / m->wavelength_step;
         float angle_frac = (angle - angle_index * angle_step) / angle_step;
@@ -113,10 +114,7 @@ bilinear_interp_property(T *m, const float &wavelength, const float &angle, cons
         // Interpolate between the two angles
         return lower_angle_wl_interp + angle_frac * (upper_angle_wl_interp - lower_angle_wl_interp);
     }
+
 }
-
-
-
-
 
 #endif
