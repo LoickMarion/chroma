@@ -205,7 +205,7 @@ class GPUGeometry(object):
                 # Create the final structure with metadata
                 array_props2D = make_gpu_struct(arrayprops2d_struct_size, [reflect_gpu,detect_gpu,transmit_gpu])  # 3 arrays: reflect, detect, transmit
             else:
-                print(f"{surface.name} no array props")
+                # print(f"{surface.name} no array props")
                 array_props2D = np.uint64(0)
                 
 
